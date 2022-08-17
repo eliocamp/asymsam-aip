@@ -94,5 +94,6 @@ function(mindate, maxdate, timestep = "daily", term = c("full", "sym", "asym"),
                by = .(lev, term, time = seasonally(time))]
   }
 
-  return(out)
+  filename <- paste("sam", timestep, paste0(term, collapse = "_"), paste0(level, collapse = "_"), sep = "-")
+  plumber::as_attachment(out, filename)
 }
