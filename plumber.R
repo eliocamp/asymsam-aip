@@ -54,6 +54,15 @@ seasonally <- function (x)  {
 }
 
 
+filtrar_sam <- function(sym, asym) {
+  sym_adj <- .lm.fit(cbind(1, asym), sym)$residuals
+  asym_adj <- .lm.fit(cbind(1, sym), asym)$residuals
+
+  list(sym = sym_adj,
+       asym = asym_adj)
+}
+
+
 #* @apiTitle Plumber Example API
 #* @apiDescription Plumber example description.
 
@@ -63,10 +72,17 @@ seasonally <- function (x)  {
 #* @param timestep optional processsing
 #* @param term Which sam
 #* @param level which level
+#* @param filter:boolean Whether to include a filtered estimate of A-SAM and S-SAM.
 #* @get /getsam
 #* @serializer csv
 function(mindate, maxdate, timestep = "daily", term = c("full", "sym", "asym"),
-         level = c(50, 700)) {
+         level = c(50, 700), filter = FALSE) {
+
+  filter <- switch(filter,
+    "true" = TRUE,
+    "false" = FALSE,
+    stop("filter needs to be true or false.")
+  )
   timesteps <- c("daily", "monthly", "seasonally")
   if (!timestep %in% timesteps) {
     stop("timestampt has to be one of 'daily', 'monthly' or 'seasonally'")
@@ -81,8 +97,7 @@ function(mindate, maxdate, timestep = "daily", term = c("full", "sym", "asym"),
   mindate <- as.Date(mindate)
   maxdate <- as.Date(maxdate)
 
-  out <- sam[time >= mindate & time <= maxdate][term %in% terms][lev %in% level]
-
+  out <- sam[time >= mindate & time <= maxdate][lev %in% level]
 
   if (timestep == "monthly") {
     out <- out[, .(estimate = mean(estimate),
@@ -93,6 +108,22 @@ function(mindate, maxdate, timestep = "daily", term = c("full", "sym", "asym"),
                    r.squared = mean(r.squared)),
                by = .(lev, term, time = seasonally(time))]
   }
+
+
+  if (filter & any(terms %in% c("sym", "asym"))) {
+    out <- out %>%
+      .[term != "full"] %>%
+      data.table::dcast(time + lev ~ term, value.var = "estimate") %>%
+      .[, c("sym", "asym") := filtrar_sam(sym, asym), by = .(lev)] %>%
+      data.table::melt(id.vars = c("time", "lev"),
+                       variable.name = "term",
+                       value.name = "estimate_filtered") %>%
+      .[out, on = .NATURAL]
+  }
+
+  out <- out[term %in% terms]
+
+
 
   filename <- paste("sam", timestep, paste0(term, collapse = "_"), paste0(level, collapse = "_"), sep = "-")
   plumber::as_attachment(out, filename)
